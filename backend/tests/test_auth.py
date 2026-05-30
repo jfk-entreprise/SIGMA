@@ -253,9 +253,38 @@ class TestRegister:
         assert "hashed_password" not in data
 
     @pytest.mark.asyncio
-    async def test_register_duplicate_phone(self, client, fake_redis, seeded_user):
-        """Réinscription avec un numéro déjà existant → 409."""
-        phone = seeded_user["phone_number"]
+    async def test_register_duplicate_phone_owner_blocked(self, client, fake_redis, db_session):
+        """
+        Un utilisateur OWNER qui tente de ré-utiliser le flux d'inscription
+        doit recevoir 409 — son compte a un rôle privilégié actif.
+        """
+        import uuid as _uuid
+        from app.core.security import hash_password
+        from app.models.business import Business, BusinessUser, UserRole
+        from app.models.user import User
+
+        # Créer un owner avec une appartenance OWNER
+        phone = "+22370000006"
+        user = User(
+            id=_uuid.uuid4(), phone_number=phone,
+            full_name="Owner existant", hashed_password=hash_password("Str0ngPass!"),
+            is_active=True,
+        )
+        db_session.add(user)
+        await db_session.flush()
+
+        biz = Business(
+            id=_uuid.uuid4(), name="Commerce Owner", business_type="WASH",
+            owner_id=user.id, is_active=True,
+        )
+        db_session.add(biz)
+        await db_session.flush()
+
+        db_session.add(BusinessUser(
+            id=_uuid.uuid4(), business_id=biz.id, user_id=user.id, role=UserRole.OWNER,
+        ))
+        await db_session.flush()
+
         token = self._make_registration_token(phone)
         await fake_redis.set(f"sigma:reg_token:{token}", phone, ex=900)
 
@@ -263,13 +292,67 @@ class TestRegister:
             "/api/v1/auth/register",
             headers={"Authorization": f"Bearer {token}"},
             json={
-                "phone_number": phone,
-                "full_name": "Autre",
-                "password": "Str0ngPass!",
-                "confirm_password": "Str0ngPass!",
+                "phone_number": phone, "full_name": "Autre tentative",
+                "password": "Str0ngPass!", "confirm_password": "Str0ngPass!",
             },
         )
         assert response.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_register_worker_can_claim_account(self, client, fake_redis, db_session):
+        """
+        Un Worker (créé par un Owner) peut finaliser son inscription via le flux OTP.
+        L'OTP prouve qu'il contrôle le numéro ; le mot de passe est mis à jour → 201.
+        """
+        import uuid as _uuid
+        from app.core.security import hash_password
+        from app.models.business import Business, BusinessUser, UserRole
+        from app.models.user import User
+
+        phone = "+22370000007"
+        # Simuler la création d'un Worker par un Owner (mot de passe temporaire aléatoire)
+        worker = User(
+            id=_uuid.uuid4(), phone_number=phone,
+            full_name="Worker provisoire", hashed_password=hash_password(_uuid.uuid4().hex),
+            is_active=True,
+        )
+        db_session.add(worker)
+        await db_session.flush()
+
+        # Le owner crée son commerce et y attache le worker
+        owner = User(
+            id=_uuid.uuid4(), phone_number="+22370000008",
+            full_name="Le Patron", hashed_password=hash_password("Str0ngPass!"),
+            is_active=True,
+        )
+        biz = Business(
+            id=_uuid.uuid4(), name="Commerce du patron", business_type="WASH",
+            owner_id=owner.id, is_active=True,
+        )
+        db_session.add_all([owner, biz])
+        await db_session.flush()
+        db_session.add(BusinessUser(
+            id=_uuid.uuid4(), business_id=biz.id, user_id=worker.id, role=UserRole.WORKER,
+        ))
+        await db_session.flush()
+
+        # Le worker passe par le flux OTP et finalise son inscription
+        token = self._make_registration_token(phone)
+        await fake_redis.set(f"sigma:reg_token:{token}", phone, ex=900)
+
+        response = await client.post(
+            "/api/v1/auth/register",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "phone_number": phone, "full_name": "Worker Finalisé",
+                "password": "NouveauPass1!", "confirm_password": "NouveauPass1!",
+            },
+        )
+        # Le compte est mis à jour (non créé), le statut reste 201
+        assert response.status_code == 201
+        data = response.json()
+        assert data["full_name"] == "Worker Finalisé"
+        assert str(data["id"]) == str(worker.id)  # Même compte, pas un nouveau
 
     @pytest.mark.asyncio
     async def test_register_missing_auth_header(self, client):

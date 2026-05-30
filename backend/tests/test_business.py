@@ -550,3 +550,199 @@ class TestMultiTenantIsolation:
         assert biz_a["name"] == "Commerce A"
         assert biz_b["name"] == "Commerce B"
         assert biz_a["id"] != biz_b["id"]
+
+    @pytest.mark.asyncio
+    async def test_cross_tenant_item_modification_forbidden(self, client, db_session):
+        """
+        Attaque de traversée tenant (cross-tenant) :
+        L'Owner du commerce B connaît l'UUID d'un item appartenant au commerce A
+        et tente de le modifier avec son propre token valide.
+        Le serveur doit retourner 404 (et non 200), car l'item n'appartient pas
+        au commerce de l'attaquant.
+        """
+        from app.core.security import create_access_token, hash_password
+        from app.models.user import User
+
+        user_a = User(
+            id=uuid.uuid4(), phone_number="+22370000070",
+            full_name="Owner A", hashed_password=hash_password("Str0ngPass!"),
+            is_active=True,
+        )
+        user_b = User(
+            id=uuid.uuid4(), phone_number="+22370000071",
+            full_name="Owner B", hashed_password=hash_password("Str0ngPass!"),
+            is_active=True,
+        )
+        db_session.add_all([user_a, user_b])
+        await db_session.flush()
+
+        headers_a = {"Authorization": f"Bearer {create_access_token(str(user_a.id), user_a.phone_number)}"}
+        headers_b = {"Authorization": f"Bearer {create_access_token(str(user_b.id), user_b.phone_number)}"}
+
+        # Les deux owners créent chacun leur commerce WASH
+        await client.post("/api/v1/businesses/", headers=headers_a, json={"name": "Commerce A", "business_type": "WASH"})
+        await client.post("/api/v1/businesses/", headers=headers_b, json={"name": "Commerce B", "business_type": "WASH"})
+
+        # Récupérer un item du commerce A (Owner A connaît cet UUID)
+        items_a = (await client.get("/api/v1/businesses/items", headers=headers_a)).json()
+        item_a_id = items_a[0]["id"]
+
+        # Owner B tente de modifier l'item du commerce A avec son propre token
+        response = await client.patch(
+            f"/api/v1/businesses/items/{item_a_id}",
+            headers=headers_b,
+            json={"custom_price": 1},
+        )
+
+        # Doit retourner 404 : item introuvable dans le commerce de B
+        assert response.status_code == 404, (
+            f"Attendu 404 (isolation tenant), obtenu {response.status_code}. "
+            "Un owner d'un autre commerce ne doit jamais pouvoir modifier "
+            "les items d'un commerce qui ne lui appartient pas."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests : Autorisation WORKER
+# ---------------------------------------------------------------------------
+
+
+class TestWorkerAuthorization:
+    """Vérifie que le rôle WORKER est correctement bloqué sur les routes Owner-only."""
+
+    @pytest.fixture
+    def _worker_setup(self):
+        """Données partagées pour les tests WORKER (constantes de numéros)."""
+        return {
+            "owner_phone": "+22370000082",
+            "worker_phone": "+22370000083",
+        }
+
+    async def _create_worker_in_business(self, db_session, business_id: uuid.UUID):
+        """Helper : crée un User + BusinessUser WORKER dans le commerce donné."""
+        from app.core.security import create_access_token, hash_password
+        from app.models.business import BusinessUser, UserRole
+        from app.models.user import User
+
+        worker = User(
+            id=uuid.uuid4(),
+            phone_number="+22370000083",
+            full_name="Worker Test",
+            hashed_password=hash_password("Str0ngPass!"),
+            is_active=True,
+        )
+        db_session.add(worker)
+        await db_session.flush()
+
+        db_session.add(BusinessUser(
+            id=uuid.uuid4(),
+            business_id=business_id,
+            user_id=worker.id,
+            role=UserRole.WORKER,
+        ))
+        await db_session.flush()
+
+        return worker, create_access_token(str(worker.id), worker.phone_number)
+
+    @pytest.mark.asyncio
+    async def test_worker_cannot_patch_item(self, client, owner_user, created_business, db_session):
+        """Un WORKER tente de modifier le prix d'un item → 403 Forbidden."""
+        worker, token = await self._create_worker_in_business(
+            db_session, uuid.UUID(created_business["id"])
+        )
+        worker_headers = {"Authorization": f"Bearer {token}"}
+
+        # Le worker peut lire les items (accès en lecture autorisé)
+        items = (await client.get("/api/v1/businesses/items", headers=worker_headers)).json()
+        assert len(items) > 0, "Le WORKER doit pouvoir lire les items (GET /items)."
+
+        # Mais ne peut pas les modifier
+        response = await client.patch(
+            f"/api/v1/businesses/items/{items[0]['id']}",
+            headers=worker_headers,
+            json={"custom_price": 9999},
+        )
+        assert response.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_worker_cannot_add_manager(self, client, owner_user, created_business, db_session):
+        """Un WORKER tente d'ajouter un gérant → 403 Forbidden."""
+        _, token = await self._create_worker_in_business(
+            db_session, uuid.UUID(created_business["id"])
+        )
+        worker_headers = {"Authorization": f"Bearer {token}"}
+
+        response = await client.post(
+            "/api/v1/businesses/managers",
+            headers=worker_headers,
+            json={
+                "full_name": "Nouveau Manager",
+                "phone_number": "+22370000099",
+                "password": "ManagerPass1!",
+            },
+        )
+        assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Tests : Idempotence du seed item_definitions
+# ---------------------------------------------------------------------------
+
+
+class TestSeedIdempotence:
+    """Vérifie que seed_item_definitions est robuste aux appels multiples."""
+
+    @pytest.mark.asyncio
+    async def test_seed_called_twice_no_duplicates(self, db_environment):
+        """
+        Appeler seed_item_definitions une seconde fois (après que db_environment
+        l'ait déjà exécuté) ne doit pas créer de doublons dans item_definitions.
+        Le catalogue WASH doit toujours contenir exactement 13 entrées.
+        """
+        from sqlalchemy import func, select
+        from app.models.item import ItemDefinition
+        from app.services.business import seed_item_definitions
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        TestSessionFactory = db_environment
+
+        # Deuxième appel au seed (le premier est fait par db_environment)
+        async with TestSessionFactory() as session:
+            await seed_item_definitions(session)
+
+        # Compter les item_definitions — doit rester à 13
+        async with TestSessionFactory() as session:
+            result = await session.execute(
+                select(func.count()).select_from(ItemDefinition)
+            )
+            total = result.scalar()
+
+        assert total == 13, (
+            f"Attendu 13 item_definitions après double seed, obtenu {total}. "
+            "La fonction seed_item_definitions n'est pas idempotente."
+        )
+
+    @pytest.mark.asyncio
+    async def test_seed_called_ten_times_no_duplicates(self, db_environment):
+        """
+        Stress-test d'idempotence : 10 appels consécutifs → toujours 13 items.
+        Simule des redémarrages répétés de l'application.
+        """
+        from sqlalchemy import func, select
+        from app.models.item import ItemDefinition
+        from app.services.business import seed_item_definitions
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        TestSessionFactory = db_environment
+
+        for _ in range(9):  # db_environment en a déjà fait 1
+            async with TestSessionFactory() as session:
+                await seed_item_definitions(session)
+
+        async with TestSessionFactory() as session:
+            result = await session.execute(
+                select(func.count()).select_from(ItemDefinition)
+            )
+            total = result.scalar()
+
+        assert total == 13

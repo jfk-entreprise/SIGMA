@@ -194,14 +194,22 @@ async def add_manager(
 
     try:
         membership = await biz_svc.add_staff_member(db, business, body)
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Le numéro {body.phone_number} est déjà membre de ce commerce."
-            ),
-        )
+        # Distinguer la contrainte violée pour fournir un message précis.
+        # SQLite : "UNIQUE constraint failed: <table>.<col>, ..."
+        # PostgreSQL : "duplicate key value violates unique constraint "<name>""
+        orig = str(exc.orig).lower() if exc.orig else str(exc).lower()
+        if "business_users" in orig or "uq_business_user" in orig:
+            detail = f"Le numéro {body.phone_number} est déjà membre de ce commerce."
+        elif "phone" in orig:
+            detail = (
+                f"Le numéro {body.phone_number} est déjà associé à un autre compte "
+                "utilisateur dans le système."
+            )
+        else:
+            detail = "Conflit de données. Veuillez vérifier les informations saisies."
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
     return BusinessMemberResponse(
         id=membership.id,

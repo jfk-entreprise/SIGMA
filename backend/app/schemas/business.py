@@ -6,14 +6,18 @@ Couvre :
 - Items de prestation (BusinessItem)
 - Création de staff (Manager / Worker) par l'Owner
 """
+import re
 import uuid
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.business import BusinessType, UserRole
-from app.schemas.auth import _validate_phone, _validate_password_strength
+from app.models.business import BusinessType
+from app.schemas.auth import _validate_password_strength, _validate_phone
+
+# Regex E.164 — cohérente avec app/schemas/auth.py
+_PHONE_REGEX = re.compile(r"^\+?[1-9]\d{7,14}$")
 
 
 # ---------------------------------------------------------------------------
@@ -30,15 +34,18 @@ class BusinessCreate(BaseModel):
         examples=["Lavage Express Bamako"],
         description="Nom du commerce.",
     )
-    business_type: str = Field(
+    business_type: BusinessType = Field(
         ...,
         examples=["WASH"],
-        description=f"Type de commerce : {', '.join(BusinessType.ALL)}.",
+        description=(
+            f"Type de commerce. Valeurs acceptées : "
+            f"{', '.join(bt.value for bt in BusinessType)}."
+        ),
     )
     phone: Optional[str] = Field(
         default=None,
         examples=["+22370000000"],
-        description="Numéro de téléphone du commerce (optionnel).",
+        description="Numéro de téléphone du commerce au format E.164 (optionnel).",
     )
     location: Optional[str] = Field(
         default=None,
@@ -47,12 +54,19 @@ class BusinessCreate(BaseModel):
         description="Adresse ou description de localisation.",
     )
 
-    def model_post_init(self, __context: object) -> None:
-        if self.business_type not in BusinessType.ALL:
+    @field_validator("phone")
+    @classmethod
+    def validate_business_phone(cls, v: Optional[str]) -> Optional[str]:
+        """Validation E.164 du numéro de téléphone du commerce (optionnel)."""
+        if v is None:
+            return v
+        cleaned = v.strip().replace(" ", "").replace("-", "")
+        if not _PHONE_REGEX.match(cleaned):
             raise ValueError(
-                f"Type de commerce invalide '{self.business_type}'. "
-                f"Valeurs acceptées : {', '.join(BusinessType.ALL)}."
+                "Le numéro de téléphone du commerce doit être au format international E.164 "
+                "(ex: +22370000000)."
             )
+        return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +160,7 @@ class UserCreateManager(BaseModel):
         examples=["SecurePass1!"],
         description="Mot de passe initial du gérant.",
     )
-    role: Literal["MANAGER"] = UserRole.MANAGER
+    role: Literal["MANAGER"] = "MANAGER"
 
     def model_post_init(self, __context: object) -> None:
         _validate_phone(self.phone_number)
@@ -156,7 +170,9 @@ class UserCreateManager(BaseModel):
 class UserCreateWorker(BaseModel):
     """
     Corps de la requête POST /businesses/workers.
-    Permet à l'Owner de créer un Travailleur (WORKER) — accès limité, sans mot de passe applicatif.
+    Permet à l'Owner de créer un Travailleur (WORKER).
+    Le Worker peut finaliser son inscription (définir son mot de passe) via
+    le flux OTP standard (/auth/otp/request → /auth/otp/verify → /auth/register).
     """
 
     full_name: str = Field(
@@ -171,7 +187,7 @@ class UserCreateWorker(BaseModel):
         examples=["+22370000002"],
         description="Numéro de téléphone du travailleur.",
     )
-    role: Literal["WORKER"] = UserRole.WORKER
+    role: Literal["WORKER"] = "WORKER"
 
     def model_post_init(self, __context: object) -> None:
         _validate_phone(self.phone_number)

@@ -31,6 +31,7 @@ from app.core.security import (
 )
 from app.config import settings
 from app.db.session import get_db
+from app.models.business import BusinessUser, UserRole
 from app.models.user import User
 from app.schemas.auth import (
     OTPRequest,
@@ -305,36 +306,58 @@ async def register_user(
     # 5. Vérifier l'unicité du numéro en DB
     existing_user = await _get_user_by_phone(db, body.phone_number)
     if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Un compte existe déjà pour le numéro {body.phone_number}. "
-                "Veuillez vous connecter."
-            ),
+        # Vérifier si le compte possède un rôle privilégié (OWNER ou MANAGER).
+        # Si oui → 409 : l'utilisateur doit se connecter normalement.
+        # Si non (WORKER ou aucune appartenance) → parcours "claim" :
+        # l'OTP prouve que le téléphone lui appartient, on finalise le compte.
+        privileged = await db.execute(
+            select(BusinessUser).where(
+                BusinessUser.user_id == existing_user.id,
+                BusinessUser.role.in_([UserRole.OWNER, UserRole.MANAGER]),
+            )
         )
+        if privileged.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Un compte actif existe déjà pour le numéro {body.phone_number}. "
+                    "Veuillez vous connecter."
+                ),
+            )
 
-    # 6. Créer l'utilisateur en base de données
-    new_user = User(
-        id=uuid.uuid4(),
-        phone_number=body.phone_number,
-        full_name=body.full_name,
-        email=body.email,
-        hashed_password=hash_password(body.password),
-        is_active=True,
-    )
-    db.add(new_user)
-    await db.flush()
+        # Compte Worker ou sans commerce → mise à jour des credentials
+        existing_user.full_name = body.full_name
+        existing_user.email = body.email
+        existing_user.hashed_password = hash_password(body.password)
+        existing_user.is_active = True
+        await db.flush()
+        new_user = existing_user
+        logger.info(
+            "[REGISTER] ✅ Compte Worker finalisé | id=%s | phone=%s",
+            new_user.id, new_user.phone_number,
+        )
+    else:
+        # 6. Créer l'utilisateur en base de données
+        new_user = User(
+            id=uuid.uuid4(),
+            phone_number=body.phone_number,
+            full_name=body.full_name,
+            email=body.email,
+            hashed_password=hash_password(body.password),
+            is_active=True,
+        )
+        db.add(new_user)
+        await db.flush()
+        logger.info(
+            "[REGISTER] ✅ Compte créé | id=%s | phone=%s | name=%s",
+            new_user.id, new_user.phone_number, new_user.full_name,
+        )
 
     # 7. Invalider le token d'inscription (usage unique)
     try:
         await rc.delete_registration_token(redis, raw_token)
     except RedisError as e:
         logger.error("Défaut Redis lors de la suppression du token d'inscription : %s", e)
-
-    logger.info(
-        "[REGISTER] ✅ Compte créé | id=%s | phone=%s | name=%s",
-        new_user.id, new_user.phone_number, new_user.full_name,
-    )
 
     return UserResponse(
         id=new_user.id,

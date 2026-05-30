@@ -1,6 +1,7 @@
 """Modèles SQLAlchemy — Commerce et appartenance utilisateur-commerce."""
 from __future__ import annotations
 
+import enum
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -18,23 +19,20 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# Énumérations (stockées comme String pour portabilité multi-backend)
+# Énumérations — str, enum.Enum garantit l'immutabilité et le typage fort.
+# Stockées comme String en base pour la portabilité multi-backend.
 # ---------------------------------------------------------------------------
 
-class BusinessType:
-    WASH = "WASH"
-    LAUNDRY = "LAUNDRY"
+class BusinessType(str, enum.Enum):
+    WASH     = "WASH"
+    LAUNDRY  = "LAUNDRY"
     PRESSING = "PRESSING"
 
-    ALL = [WASH, LAUNDRY, PRESSING]
 
-
-class UserRole:
-    OWNER = "OWNER"
+class UserRole(str, enum.Enum):
+    OWNER   = "OWNER"
     MANAGER = "MANAGER"
-    WORKER = "WORKER"
-
-    ALL = [OWNER, MANAGER, WORKER]
+    WORKER  = "WORKER"
 
 
 # ---------------------------------------------------------------------------

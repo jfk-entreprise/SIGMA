@@ -5,7 +5,7 @@ Responsabilités :
 - Création d'un commerce avec validation des règles métier
 - Initialisation automatique des items depuis le catalogue central
 - Ajout de membres (Manager / Worker)
-- Seed du catalogue item_definitions
+- Seed idempotent du catalogue item_definitions
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
-from app.models.business import Business, BusinessUser, BusinessType, UserRole
+from app.models.business import Business, BusinessType, BusinessUser, UserRole
 from app.models.item import BusinessItem, ItemCategory, ItemDefinition
 from app.models.user import User
 from app.schemas.business import BusinessCreate, UserCreateManager, UserCreateWorker
@@ -31,24 +31,24 @@ logger = logging.getLogger(__name__)
 
 _WASH_SEED: list[dict] = [
     # Véhicules — prix de base du lavage simple
-    {"category": ItemCategory.VEHICLE, "name": "4x4",          "default_price": 4000, "display_order": 1, "icon_name": "suv"},
-    {"category": ItemCategory.VEHICLE, "name": "Berline",       "default_price": 3000, "display_order": 2, "icon_name": "sedan"},
-    {"category": ItemCategory.VEHICLE, "name": "Taxi",          "default_price": 2500, "display_order": 3, "icon_name": "taxi"},
-    {"category": ItemCategory.VEHICLE, "name": "Moto",          "default_price": 1500, "display_order": 4, "icon_name": "moto"},
-    {"category": ItemCategory.VEHICLE, "name": "Bus / Camion",  "default_price": 7000, "display_order": 5, "icon_name": "bus"},
-    # Modificateurs de type de lavage (appliqués en supplément du véhicule)
-    {"category": ItemCategory.WASH_TYPE, "name": "Lavage simple",   "default_price":    0, "display_order": 1, "icon_name": "wash_simple"},
-    {"category": ItemCategory.WASH_TYPE, "name": "Lavage complet",  "default_price": 1000, "display_order": 2, "icon_name": "wash_full"},
-    {"category": ItemCategory.WASH_TYPE, "name": "Lavage premium",  "default_price": 2000, "display_order": 3, "icon_name": "wash_premium"},
-    {"category": ItemCategory.WASH_TYPE, "name": "Lavage aspiré",   "default_price": 1500, "display_order": 4, "icon_name": "wash_vacuum"},
-    # Services complémentaires
+    {"category": ItemCategory.VEHICLE, "name": "4x4",         "default_price": 4000, "display_order": 1, "icon_name": "suv"},
+    {"category": ItemCategory.VEHICLE, "name": "Berline",      "default_price": 3000, "display_order": 2, "icon_name": "sedan"},
+    {"category": ItemCategory.VEHICLE, "name": "Taxi",         "default_price": 2500, "display_order": 3, "icon_name": "taxi"},
+    {"category": ItemCategory.VEHICLE, "name": "Moto",         "default_price": 1500, "display_order": 4, "icon_name": "moto"},
+    {"category": ItemCategory.VEHICLE, "name": "Bus / Camion", "default_price": 7000, "display_order": 5, "icon_name": "bus"},
+    # Modificateurs de type de lavage (supplément par rapport au prix du véhicule)
+    {"category": ItemCategory.WASH_TYPE, "name": "Lavage simple",  "default_price":    0, "display_order": 1, "icon_name": "wash_simple"},
+    {"category": ItemCategory.WASH_TYPE, "name": "Lavage complet", "default_price": 1000, "display_order": 2, "icon_name": "wash_full"},
+    {"category": ItemCategory.WASH_TYPE, "name": "Lavage premium", "default_price": 2000, "display_order": 3, "icon_name": "wash_premium"},
+    {"category": ItemCategory.WASH_TYPE, "name": "Lavage aspiré",  "default_price": 1500, "display_order": 4, "icon_name": "wash_vacuum"},
+    # Services complémentaires (add-ons)
     {"category": ItemCategory.ADDON, "name": "Aspirateur", "default_price": 1000, "display_order": 1, "icon_name": "vacuum"},
     {"category": ItemCategory.ADDON, "name": "Moteur",     "default_price": 2000, "display_order": 2, "icon_name": "engine"},
     {"category": ItemCategory.ADDON, "name": "Cire",       "default_price": 1500, "display_order": 3, "icon_name": "wax"},
     {"category": ItemCategory.ADDON, "name": "Parfum",     "default_price":  500, "display_order": 4, "icon_name": "perfume"},
 ]
 
-_SEED_MAP: dict[str, list[dict]] = {
+_SEED_MAP: dict[BusinessType, list[dict]] = {
     BusinessType.WASH: _WASH_SEED,
 }
 
@@ -60,26 +60,44 @@ _SEED_MAP: dict[str, list[dict]] = {
 async def seed_item_definitions(db: AsyncSession) -> None:
     """
     Peuple la table item_definitions pour tous les types de commerce connus.
-    Opération idempotente : n'insère que les définitions manquantes.
-    Appelée au démarrage de l'application.
+
+    Idempotence :
+    - Chaque item est inséré uniquement s'il est absent (SELECT-then-INSERT).
+    - La contrainte uq_item_definition_type_cat_name protège des doublons en cas
+      de démarrage concurrent : l'IntegrityError au commit est capturée et ignorée.
+    - Appelée au démarrage de l'application (main.py lifespan).
     """
+    added = 0
     for btype, items in _SEED_MAP.items():
         for item in items:
-            existing = await db.execute(
+            result = await db.execute(
                 select(ItemDefinition).where(
                     ItemDefinition.business_type == btype,
                     ItemDefinition.category == item["category"],
                     ItemDefinition.name == item["name"],
                 )
             )
-            if existing.scalar_one_or_none() is None:
+            if result.scalar_one_or_none() is None:
                 db.add(ItemDefinition(
                     id=uuid.uuid4(),
                     business_type=btype,
                     **item,
                 ))
-    await db.commit()
-    logger.info("✅ Catalogue item_definitions synchronisé.")
+                added += 1
+
+    if added > 0:
+        try:
+            await db.commit()
+            logger.info("✅ Catalogue item_definitions : %d item(s) ajouté(s).", added)
+        except IntegrityError:
+            # Démarrage concurrent : une autre instance a inséré en premier — aucun doublon.
+            await db.rollback()
+            logger.info(
+                "✅ Catalogue item_definitions déjà à jour "
+                "(conflit de démarrage concurrent ignoré)."
+            )
+    else:
+        logger.info("✅ Catalogue item_definitions déjà à jour (aucun ajout nécessaire).")
 
 
 # ---------------------------------------------------------------------------
@@ -96,13 +114,11 @@ async def create_business(
 
     Règles métier :
     - L'owner ne peut pas posséder plusieurs commerces actifs (409 géré dans le router).
-    - Le type de commerce doit exister dans le catalogue (validé par Pydantic).
     - Copie automatique des items depuis item_definitions.
 
     Returns:
         Le Business créé avec ses items initialisés.
     """
-    # 1. Créer le commerce
     business = Business(
         id=uuid.uuid4(),
         name=data.name,
@@ -113,18 +129,15 @@ async def create_business(
         is_active=True,
     )
     db.add(business)
-    await db.flush()  # Obtenir l'ID sans commit pour la FK des items
+    await db.flush()
 
-    # 2. Créer l'appartenance OWNER
-    membership = BusinessUser(
+    db.add(BusinessUser(
         id=uuid.uuid4(),
         business_id=business.id,
         user_id=owner.id,
         role=UserRole.OWNER,
-    )
-    db.add(membership)
+    ))
 
-    # 3. Copier les items du catalogue vers le commerce
     await _initialize_business_items(db, business)
 
     await db.flush()
@@ -142,8 +155,8 @@ async def _initialize_business_items(
     business: Business,
 ) -> list[BusinessItem]:
     """
-    Copie les ItemDefinition actives correspondant au type de commerce
-    vers business_items avec custom_price = default_price.
+    Copie les ItemDefinition actives du catalogue vers business_items.
+    custom_price hérite de default_price.
     """
     result = await db.execute(
         select(ItemDefinition).where(
@@ -178,9 +191,7 @@ async def _initialize_business_items(
 # Récupération du commerce de l'utilisateur
 # ---------------------------------------------------------------------------
 
-async def get_user_business(
-    db: AsyncSession, user: User
-) -> Business | None:
+async def get_user_business(db: AsyncSession, user: User) -> Business | None:
     """Retourne le premier commerce actif de l'utilisateur (owner ou membre)."""
     result = await db.execute(
         select(Business)
@@ -196,7 +207,7 @@ async def get_user_business(
 
 
 # ---------------------------------------------------------------------------
-# Récupération des items actifs d'un commerce
+# Récupération des items d'un commerce
 # ---------------------------------------------------------------------------
 
 async def get_business_items(
@@ -204,7 +215,7 @@ async def get_business_items(
     business_id: uuid.UUID,
     active_only: bool = True,
 ) -> Sequence[BusinessItem]:
-    """Retourne les items d'un commerce, triés par catégorie et ordre d'affichage."""
+    """Retourne les items d'un commerce, triés par ordre d'affichage."""
     stmt = (
         select(BusinessItem)
         .where(BusinessItem.business_id == business_id)
@@ -262,17 +273,22 @@ async def add_staff_member(
     Crée (ou retrouve) un utilisateur et l'associe au commerce avec le rôle donné.
 
     Comportement :
-    - Si le numéro de téléphone est déjà enregistré, on réutilise l'utilisateur existant.
-    - Si l'utilisateur est déjà membre du commerce, on lève IntegrityError (409 dans le router).
+    - Numéro déjà enregistré → réutilise le compte existant sans modifier le mot de passe.
+    - Numéro nouveau → crée un compte avec mot de passe fourni (MANAGER) ou aléatoire (WORKER).
+      Un Worker peut ultérieurement finaliser son compte via /auth/register (flux OTP).
+    - Doublon d'appartenance → IntegrityError levée (capturée dans le router → 409).
     """
-    # 1. Chercher ou créer l'utilisateur
     result = await db.execute(
         select(User).where(User.phone_number == data.phone_number)
     )
     user = result.scalar_one_or_none()
 
     if user is None:
-        hashed = hash_password(data.password) if isinstance(data, UserCreateManager) else hash_password(uuid.uuid4().hex)
+        hashed = (
+            hash_password(data.password)
+            if isinstance(data, UserCreateManager)
+            else hash_password(uuid.uuid4().hex)  # Mot de passe temporaire pour WORKER
+        )
         user = User(
             id=uuid.uuid4(),
             phone_number=data.phone_number,
@@ -283,7 +299,6 @@ async def add_staff_member(
         db.add(user)
         await db.flush()
 
-    # 2. Créer l'appartenance
     membership = BusinessUser(
         id=uuid.uuid4(),
         business_id=business.id,

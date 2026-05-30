@@ -34,8 +34,16 @@ class ItemDefinition(Base):
     """
     Table centrale immuable : référentiel des prestations par type de commerce.
     Peuplée via seed, non modifiable par les utilisateurs.
+    La contrainte d'unicité (business_type, category, name) garantit l'idempotence
+    du seed même en cas de démarrage concurrent de plusieurs instances.
     """
     __tablename__ = "item_definitions"
+    __table_args__ = (
+        UniqueConstraint(
+            "business_type", "category", "name",
+            name="uq_item_definition_type_cat_name",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True, default=uuid.uuid4, nullable=False
