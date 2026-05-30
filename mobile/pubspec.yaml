@@ -1,0 +1,73 @@
+name: sigma_app
+description: ERP mobile intelligent multi-commerce offline-first
+publish_to: "none"
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # =========================
+  # DATABASE & OFFLINE
+  # =========================
+  drift: ^2.33.0
+  sqlite3_flutter_libs: ^0.5.42
+  path_provider: ^2.1.5
+  path: ^1.9.1
+
+  # =========================
+  # NETWORK & API
+  # =========================
+  dio: ^5.5.1
+
+  # =========================
+  # SECURITY & STORAGE
+  # =========================
+  flutter_secure_storage: ^9.2.3
+
+  # =========================
+  # STATE MANAGEMENT
+  # =========================
+  flutter_bloc: ^8.1.5
+
+  # Si tu préfères Riverpod,
+  # remplace flutter_bloc par :
+  #
+  # flutter_riverpod: ^2.5.1
+
+  # =========================
+  # UI
+  # =========================
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^4.0.0
+
+  # =========================
+  # DRIFT CODE GENERATION
+  # =========================
+  drift_dev: ^2.33.0
+  build_runner: ^2.4.10
+
+flutter:
+  uses-material-design: true
+
+  # assets:
+    # - assets/icons/
+    # - assets/images/
+    # - assets/animations/
+
+  # Exemple fonts personnalisées
+  # fonts:
+  #   - family: Inter
+  #     fonts:
+  #       - asset: assets/fonts/Inter-Regular.ttf
+  #       - asset: assets/fonts/Inter-Bold.ttf
+  #         weight: 700

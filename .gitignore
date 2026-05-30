@@ -1,0 +1,67 @@
+# ============================================================
+# SIGMA — .gitignore global
+# ============================================================
+
+# --- Secrets & variables d'environnement ---
+.env
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# --- Base de données ---
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Python / Backend ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.egg-info/
+dist/
+*.egg
+.eggs/
+pip-wheel-metadata/
+backend/venv/
+backend/.venv/
+backend/app.db
+# Alembic : versions générées automatiquement NON ignorées (à committer)
+
+# --- Flutter / Mobile ---
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+mobile/ios/.symlinks/
+mobile/ios/Pods/
+mobile/ios/Flutter/Generated.xcconfig
+mobile/ios/Flutter/flutter_export_environment.sh
+mobile/ios/Flutter/ephemeral/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/key.properties
+*.flutter-*-bootstrap
+*.g.dart
+*.freezed.dart
+
+# --- IDEs & Outils ---
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*.swo
+*~

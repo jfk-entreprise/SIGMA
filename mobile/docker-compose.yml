@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: sigma_postgres
+    environment:
+      POSTGRES_DB: sigma_db
+      POSTGRES_USER: sigma_admin
+      POSTGRES_PASSWORD: sigma_secure_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: sigma_redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_data:

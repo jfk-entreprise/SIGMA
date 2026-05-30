@@ -1,0 +1,46 @@
+# ============================================================
+# SIGMA — Normalisation des fins de ligne (cross-platform)
+# ============================================================
+
+# Par défaut : LF dans le dépôt, conversion automatique selon l'OS au checkout
+* text=auto eol=lf
+
+# Scripts shell et Python : toujours LF
+*.py      text eol=lf
+*.sh      text eol=lf
+*.bash    text eol=lf
+
+# Fichiers texte structurés : toujours LF
+*.md      text eol=lf
+*.txt     text eol=lf
+*.json    text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.toml    text eol=lf
+*.ini     text eol=lf
+*.cfg     text eol=lf
+*.env*    text eol=lf
+*.sql     text eol=lf
+
+# Fichiers Windows (gradle, bat) : CRLF
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+gradlew.bat text eol=crlf
+
+# Binaires : aucune conversion
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.svg     binary
+*.pdf     binary
+*.ttf     binary
+*.woff    binary
+*.woff2   binary
+*.zip     binary
+*.tar.gz  binary
+*.jar     binary
+*.aar     binary
+*.so      binary
+*.dylib   binary
