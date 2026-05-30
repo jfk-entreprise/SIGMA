@@ -16,6 +16,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Sequence
 
+from app.services import reports as reports_svc
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -82,6 +84,9 @@ async def record_payment(
         "[PAYMENT] Paiement enregistré | id=%s | order=%s | method=%s | amount=%d",
         payment.id, order.id, data.payment_method, data.amount,
     )
+    await reports_svc.generate_or_update_daily_report(
+        db, order.business_id, datetime.now(timezone.utc).date()
+    )
     return payment
 
 
@@ -113,6 +118,9 @@ async def record_expense(
     logger.info(
         "[EXPENSE] Dépense enregistrée | id=%s | business=%s | amount=%d",
         expense.id, business_id, data.amount,
+    )
+    await reports_svc.generate_or_update_daily_report(
+        db, business_id, datetime.now(timezone.utc).date()
     )
     return expense
 
@@ -164,6 +172,9 @@ async def record_credit(
     logger.info(
         "[CREDIT] Créance enregistrée | id=%s | business=%s | customer=%s | amount=%d",
         credit.id, business_id, data.customer_name, data.amount,
+    )
+    await reports_svc.generate_or_update_daily_report(
+        db, business_id, datetime.now(timezone.utc).date()
     )
     return credit
 

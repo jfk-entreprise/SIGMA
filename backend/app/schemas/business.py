@@ -84,6 +84,7 @@ class BusinessResponse(BaseModel):
     phone: Optional[str] = None
     location: Optional[str] = None
     is_active: bool
+    subscription_plan: str = "FREE"
     owner_id: uuid.UUID
     created_at: datetime
 

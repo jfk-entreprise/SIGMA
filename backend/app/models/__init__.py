@@ -8,6 +8,7 @@ from app.models.business import Business, BusinessUser  # noqa: F401
 from app.models.item import ItemDefinition, BusinessItem  # noqa: F401
 from app.models.service_order import ServiceOrder, ServiceOrderItem  # noqa: F401
 from app.models.financial import Payment, Expense, Credit  # noqa: F401
+from app.models.report import DailyReport  # noqa: F401
 
 __all__ = [
     "User",
@@ -20,4 +21,5 @@ __all__ = [
     "Payment",
     "Expense",
     "Credit",
+    "DailyReport",
 ]

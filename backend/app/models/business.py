@@ -35,6 +35,12 @@ class UserRole(str, enum.Enum):
     WORKER  = "WORKER"
 
 
+class SubscriptionPlan(str, enum.Enum):
+    FREE        = "FREE"
+    PREMIUM     = "PREMIUM"
+    PREMIUM_PRO = "PREMIUM_PRO"
+
+
 # ---------------------------------------------------------------------------
 # Modèle Commerce
 # ---------------------------------------------------------------------------
@@ -50,6 +56,12 @@ class Business(Base):
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    subscription_plan: Mapped[str] = mapped_column(
+        String(20),
+        default=SubscriptionPlan.FREE.value,
+        server_default=SubscriptionPlan.FREE.value,
+        nullable=False,
+    )
     owner_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )

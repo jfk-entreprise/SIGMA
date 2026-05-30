@@ -131,13 +131,20 @@ async def fake_redis():
     """
     FakeRedis async isolé par test (decode_responses=True pour correspondre
     au comportement du pool Redis réel).
-    Injecté via dependency_overrides[rc.get_redis] — chaque test part d'un
-    état Redis vierge.
+
+    Double injection :
+    - dependency_overrides[get_redis] : pour les endpoints FastAPI (Depends)
+    - rc_module._redis_pool           : pour get_redis_pool() appelé depuis les
+      services (ex. generate_or_update_daily_report) sans passer par Depends.
+
+    Chaque test part d'un état Redis vierge.
     """
     r = fakeredis.aioredis.FakeRedis(decode_responses=True)
     fastapi_app.dependency_overrides[rc_module.get_redis] = lambda: r
+    rc_module._redis_pool = r
     yield r
     del fastapi_app.dependency_overrides[rc_module.get_redis]
+    rc_module._redis_pool = None
     await r.aclose()
 
 

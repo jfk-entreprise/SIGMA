@@ -22,6 +22,7 @@ from app.routers import auth as auth_router
 from app.routers import business as business_router
 from app.routers import orders as orders_router
 from app.routers import financials as financials_router
+from app.routers import reports as reports_router
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -111,6 +112,14 @@ _TAGS_METADATA = [
         ),
     },
     {
+        "name": "Rapports",
+        "description": (
+            "Rapports journaliers consolidés, tableau de bord temps réel et "
+            "synthèses hebdomadaires / mensuelles (abonnés PREMIUM+). "
+            "Requiert un Access Token valide (Bearer)."
+        ),
+    },
+    {
         "name": "Santé",
         "description": "Endpoints de surveillance de l'état de l'API.",
     },
@@ -164,6 +173,7 @@ app.include_router(auth_router.router, prefix="/api/v1")
 app.include_router(business_router.router, prefix="/api/v1")
 app.include_router(orders_router.router, prefix="/api/v1")
 app.include_router(financials_router.router, prefix="/api/v1")
+app.include_router(reports_router.router, prefix="/api/v1")
 
 # ---------------------------------------------------------------------------
 # Endpoints de base
