@@ -55,6 +55,9 @@ mobile/android/key.properties
 *.g.dart
 *.freezed.dart
 
+# --- Claude Code (configuration locale, non partageable) ---
+.claude/
+
 # --- IDEs & Outils ---
 .vscode/
 .idea/

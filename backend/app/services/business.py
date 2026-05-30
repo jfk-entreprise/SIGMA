@@ -48,8 +48,25 @@ _WASH_SEED: list[dict] = [
     {"category": ItemCategory.ADDON, "name": "Parfum",     "default_price":  500, "display_order": 4, "icon_name": "perfume"},
 ]
 
+_LAUNDRY_SEED: list[dict] = [
+    {"category": ItemCategory.GARMENT, "name": "Chemise",        "default_price": 1000, "display_order": 1, "icon_name": "shirt"},
+    {"category": ItemCategory.GARMENT, "name": "Pantalon",       "default_price": 1000, "display_order": 2, "icon_name": "pants"},
+    {"category": ItemCategory.GARMENT, "name": "Robe",           "default_price": 1500, "display_order": 3, "icon_name": "dress"},
+    {"category": ItemCategory.GARMENT, "name": "Couette / Drap", "default_price": 3000, "display_order": 4, "icon_name": "bedding"},
+    {"category": ItemCategory.GARMENT, "name": "Repassage seul", "default_price":  500, "display_order": 5, "icon_name": "iron"},
+]
+
+_PRESSING_SEED: list[dict] = [
+    {"category": ItemCategory.GARMENT, "name": "Costume complet", "default_price": 4000, "display_order": 1, "icon_name": "suit"},
+    {"category": ItemCategory.GARMENT, "name": "Veste",           "default_price": 2000, "display_order": 2, "icon_name": "jacket"},
+    {"category": ItemCategory.GARMENT, "name": "Robe de soirée",  "default_price": 3500, "display_order": 3, "icon_name": "evening_dress"},
+    {"category": ItemCategory.GARMENT, "name": "Manteau",         "default_price": 5000, "display_order": 4, "icon_name": "coat"},
+]
+
 _SEED_MAP: dict[BusinessType, list[dict]] = {
-    BusinessType.WASH: _WASH_SEED,
+    BusinessType.WASH:     _WASH_SEED,
+    BusinessType.LAUNDRY:  _LAUNDRY_SEED,
+    BusinessType.PRESSING: _PRESSING_SEED,
 }
 
 

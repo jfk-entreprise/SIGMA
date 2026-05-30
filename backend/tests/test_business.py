@@ -717,8 +717,9 @@ class TestSeedIdempotence:
             )
             total = result.scalar()
 
-        assert total == 13, (
-            f"Attendu 13 item_definitions après double seed, obtenu {total}. "
+        # 13 WASH + 5 LAUNDRY + 4 PRESSING = 22 items au total
+        assert total == 22, (
+            f"Attendu 22 item_definitions après double seed, obtenu {total}. "
             "La fonction seed_item_definitions n'est pas idempotente."
         )
 
@@ -745,4 +746,5 @@ class TestSeedIdempotence:
             )
             total = result.scalar()
 
-        assert total == 13
+        # 13 WASH + 5 LAUNDRY + 4 PRESSING = 22 items au total
+        assert total == 22

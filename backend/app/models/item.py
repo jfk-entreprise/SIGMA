@@ -22,8 +22,9 @@ class ItemCategory:
     VEHICLE   = "VEHICLE"    # Type de véhicule (4x4, Berline…)
     WASH_TYPE = "WASH_TYPE"  # Modificateur de lavage (Simple, Complet…)
     ADDON     = "ADDON"      # Service complémentaire (Aspirateur, Moteur…)
+    GARMENT   = "GARMENT"    # Article textile (chemise, pantalon…) — Blanchisserie/Pressing
 
-    ALL = [VEHICLE, WASH_TYPE, ADDON]
+    ALL = [VEHICLE, WASH_TYPE, ADDON, GARMENT]
 
 
 # ---------------------------------------------------------------------------
