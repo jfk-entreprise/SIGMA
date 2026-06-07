@@ -1,121 +1,213 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
-void main() {
-  runApp(const MyApp());
+import 'package:sigma_app/data/local/database.dart';
+import 'package:sigma_app/data/local/sync_dao.dart';
+import 'package:sigma_app/logic/bloc/auth/auth_bloc.dart';
+import 'package:sigma_app/logic/bloc/orders/order_bloc.dart';
+import 'package:sigma_app/presentation/screens/dashboard_screen.dart';
+import 'package:sigma_app/presentation/screens/pin_screen.dart';
+
+// ──────────────────────────────────────────────────────────────────
+// Observer de cycle de vie — re-verrouille après inactivité
+// ──────────────────────────────────────────────────────────────────
+
+class _LifecycleLockObserver extends StatefulWidget {
+  final Widget child;
+  const _LifecycleLockObserver({required this.child});
+
+  @override
+  State<_LifecycleLockObserver> createState() => _LifecycleLockObserverState();
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class _LifecycleLockObserverState extends State<_LifecycleLockObserver>
+    with WidgetsBindingObserver {
+  DateTime? _backgroundAt;
 
-  // This widget is the root of your application.
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _backgroundAt = DateTime.now();
+    } else if (state == AppLifecycleState.resumed &&
+        _backgroundAt != null) {
+      final elapsed =
+          DateTime.now().difference(_backgroundAt!).inSeconds;
+      _backgroundAt = null;
+      if (elapsed >= AuthBloc.kSessionTimeoutSeconds) {
+        context.read<AuthBloc>().add(const AuthLockRequested());
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final db = AppDatabase();
+  await _seedDemoIfEmpty(db);
+  runApp(SigmaApp(db: db));
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Données de démo (insérées une seule fois si la base est vide)
+// ──────────────────────────────────────────────────────────────────
+
+Future<void> _seedDemoIfEmpty(AppDatabase db) async {
+  final existing = await (db.select(db.localBusinesses)..limit(1)).get();
+  if (existing.isNotEmpty) return;
+
+  const uid = 'demo-user-id';
+  const bid = 'demo-business-id';
+
+  await db.into(db.localUsers).insertOnConflictUpdate(
+        LocalUsersCompanion.insert(
+          id: uid,
+          phoneNumber: '+22300000000',
+          fullName: const Value('Mamadou Diallo'),
+        ),
+      );
+
+  await db.into(db.localBusinesses).insertOnConflictUpdate(
+        LocalBusinessesCompanion.insert(
+          id: bid,
+          name: 'Sigma Wash Express',
+          businessType: 'WASH',
+          ownerId: uid,
+        ),
+      );
+
+  const items = [
+    ('moto', 'Moto', 1500),
+    ('berline', 'Berline', 3000),
+    ('4x4', 'Pickup / 4x4', 4500),
+    ('aspirateur', 'Aspirateur', 1000),
+    ('moteur', 'Moteur complet', 2500),
+  ];
+
+  for (final (slug, name, price) in items) {
+    await db.into(db.localBusinessItems).insertOnConflictUpdate(
+          LocalBusinessItemsCompanion.insert(
+            id: 'item-$slug',
+            businessId: bid,
+            name: name,
+            unitPrice: price,
+          ),
+        );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Application
+// ──────────────────────────────────────────────────────────────────
+
+class SigmaApp extends StatelessWidget {
+  final AppDatabase db;
+  const SigmaApp({super.key, required this.db});
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+    final syncDao = SyncQueueDao(db);
+
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider<AuthBloc>(
+          create: (_) => AuthBloc(db: db)..add(const AuthStarted()),
+        ),
+        BlocProvider<OrderBloc>(
+          create: (_) => OrderBloc(db: db, syncDao: syncDao),
+        ),
+      ],
+      child: MaterialApp(
+        title: 'SIGMA',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF1565C0),
+          ),
+          useMaterial3: true,
+        ),
+        home: const _LifecycleLockObserver(child: _RootRouter()),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
+// ──────────────────────────────────────────────────────────────────
+// Routeur racine piloté par AuthBloc
+// ──────────────────────────────────────────────────────────────────
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
-  }
+class _RootRouter extends StatelessWidget {
+  const _RootRouter();
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
+    return BlocBuilder<AuthBloc, AuthState>(
+      builder: (context, state) => switch (state) {
+        AuthAuthenticated(:final business, :final user) =>
+          DashboardScreen(business: business, user: user),
+        AuthNoData() => const _NoDataScreen(),
+        AuthLoading() => const _SplashScreen(),
+        _ => const PinScreen(),
+      },
+    );
+  }
+}
+
+class _SplashScreen extends StatelessWidget {
+  const _SplashScreen();
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+}
+
+class _NoDataScreen extends StatelessWidget {
+  const _NoDataScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Color(0xFFF4F6FA),
       body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.cloud_off_rounded,
+                  size: 72, color: Color(0xFFB0BEC5)),
+              SizedBox(height: 16),
+              Text(
+                'Aucun commerce trouvé',
+                style: TextStyle(
+                    fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Connectez-vous au réseau pour synchroniser votre compte.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: Color(0xFF90A4AE), fontSize: 14),
+              ),
+            ],
+          ),
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
       ),
     );
   }

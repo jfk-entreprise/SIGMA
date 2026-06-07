@@ -27,6 +27,7 @@ class SecureStorageService {
 
   static const _kAccessToken = 'sigma_access_token';
   static const _kRefreshToken = 'sigma_refresh_token';
+  static const _kPinHash = 'sigma_pin_hash';
 
   // ──────────────────────────────────────────────────────────────────
   // API publique
@@ -43,6 +44,24 @@ class SecureStorageService {
     await _safeWrite(_kAccessToken, accessToken);
     await _safeWrite(_kRefreshToken, refreshToken);
   }
+
+  // ── PIN ──────────────────────────────────────────────────────────
+
+  static Future<bool> hasPinHash() async {
+    try {
+      final h = await _safeRead(_kPinHash);
+      return h != null && h.isNotEmpty;
+    } on StorageKeyLostException {
+      return false;
+    }
+  }
+
+  static Future<String?> getPinHash() => _safeRead(_kPinHash);
+
+  static Future<void> savePinHash(String hash) =>
+      _safeWrite(_kPinHash, hash);
+
+  // ──────────────────────────────────────────────────────────────────
 
   /// Efface tous les secrets (déconnexion, changement de compte).
   static Future<void> clearAll() async {

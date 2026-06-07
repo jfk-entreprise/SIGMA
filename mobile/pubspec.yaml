@@ -33,6 +33,7 @@ dependencies:
   # STATE MANAGEMENT
   # =========================
   flutter_bloc: ^8.1.5
+  bloc_concurrency: ^0.2.5
 
   # Si tu préfères Riverpod,
   # remplace flutter_bloc par :
