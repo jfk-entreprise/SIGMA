@@ -1,0 +1,84 @@
+# ============================================================
+# SIGMA — Stack de développement local
+# ============================================================
+# Lance PostgreSQL + Redis avec les mêmes identifiants
+# qu'attend l'API FastAPI (backend/app/config.py).
+#
+# Usage :
+#   docker-compose up -d          # démarrage en arrière-plan
+#   docker-compose down           # arrêt (les volumes sont conservés)
+#   docker-compose down -v        # arrêt + suppression des données
+#   docker-compose logs -f        # suivi des logs en temps réel
+#
+# Une fois les services démarrés, lancez l'API depuis backend/ :
+#   alembic upgrade head          # applique les migrations
+#   uvicorn app.main:app --reload # démarre FastAPI sur :8000
+# ============================================================
+
+services:
+
+  # ──────────────────────────────────────────────────────────
+  # PostgreSQL 15
+  # ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: sigma_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sigma_user
+      POSTGRES_PASSWORD: sigma_pass
+      POSTGRES_DB: sigma_db
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      # Lié à 127.0.0.1 uniquement : pas d'exposition réseau externe.
+      # L'API FastAPI se connecte via postgresql+asyncpg://sigma_user:sigma_pass@localhost:5432/sigma_db
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - sigma_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sigma_user -d sigma_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - sigma_net
+
+  # ──────────────────────────────────────────────────────────
+  # Redis 7
+  # ──────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: sigma_redis
+    restart: unless-stopped
+    # Redis est utilisé uniquement pour des données éphémères (OTP, tokens,
+    # rate-limiting) → persistence désactivée volontairement.
+    command: redis-server --save "" --appendonly no
+    ports:
+      # L'API FastAPI se connecte via redis://localhost:6379/0
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - sigma_net
+
+# ============================================================
+# Volumes
+# ============================================================
+volumes:
+  sigma_postgres_data:
+    driver: local
+    # Les données PostgreSQL survivent aux `docker-compose down`.
+    # Pour réinitialiser : docker-compose down -v
+
+# ============================================================
+# Réseau interne
+# ============================================================
+networks:
+  sigma_net:
+    driver: bridge
